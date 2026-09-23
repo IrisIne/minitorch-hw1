@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # This code will JIT compile fast versions your tensor_data functions.
 # If you get an error, read the docs for NUMBA as to what is allowed
 # in these functions.
-to_index = njit(inline="always")(to_index)
+to_index = njit()(to_index)
 index_to_position = njit(inline="always")(index_to_position)
 broadcast_index = njit(inline="always")(broadcast_index)
 
@@ -159,8 +159,23 @@ def tensor_map(
         in_shape: Shape,
         in_strides: Strides,
     ) -> None:
-        # TODO: Implement for Task 3.1.
-        raise NotImplementedError('Need to implement for Task 3.1')
+        aligned = len(out_shape) == len(in_shape)
+        if aligned:
+            for dim in range(len(out_shape)):
+                if out_shape[dim] != in_shape[dim] or out_strides[dim] != in_strides[dim]:
+                    aligned = False
+                    break
+        for ordinal in prange(len(out)):
+            if aligned:
+                out[ordinal] = fn(in_storage[ordinal])
+            else:
+                out_index = np.empty(MAX_DIMS, dtype=np.int32)
+                in_index = np.empty(MAX_DIMS, dtype=np.int32)
+                to_index(ordinal, out_shape, out_index)
+                broadcast_index(out_index, out_shape, in_shape, in_index)
+                out[index_to_position(out_index, out_strides)] = fn(
+                    in_storage[index_to_position(in_index, in_strides)]
+                )
 
     return njit(parallel=True)(_map)  # type: ignore
 
@@ -198,8 +213,31 @@ def tensor_zip(
         b_shape: Shape,
         b_strides: Strides,
     ) -> None:
-        # TODO: Implement for Task 3.1.
-        raise NotImplementedError('Need to implement for Task 3.1')
+        aligned = len(out_shape) == len(a_shape) == len(b_shape)
+        if aligned:
+            for dim in range(len(out_shape)):
+                if (
+                    out_shape[dim] != a_shape[dim]
+                    or out_shape[dim] != b_shape[dim]
+                    or out_strides[dim] != a_strides[dim]
+                    or out_strides[dim] != b_strides[dim]
+                ):
+                    aligned = False
+                    break
+        for ordinal in prange(len(out)):
+            if aligned:
+                out[ordinal] = fn(a_storage[ordinal], b_storage[ordinal])
+            else:
+                out_index = np.empty(MAX_DIMS, dtype=np.int32)
+                a_index = np.empty(MAX_DIMS, dtype=np.int32)
+                b_index = np.empty(MAX_DIMS, dtype=np.int32)
+                to_index(ordinal, out_shape, out_index)
+                broadcast_index(out_index, out_shape, a_shape, a_index)
+                broadcast_index(out_index, out_shape, b_shape, b_index)
+                out[index_to_position(out_index, out_strides)] = fn(
+                    a_storage[index_to_position(a_index, a_strides)],
+                    b_storage[index_to_position(b_index, b_strides)],
+                )
 
     return njit(parallel=True)(_zip)  # type: ignore
 
@@ -232,8 +270,18 @@ def tensor_reduce(
         a_strides: Strides,
         reduce_dim: int,
     ) -> None:
-        # TODO: Implement for Task 3.1.
-        raise NotImplementedError('Need to implement for Task 3.1')
+        for ordinal in prange(len(out)):
+            out_index = np.empty(MAX_DIMS, dtype=np.int32)
+            to_index(ordinal, out_shape, out_index)
+            out_position = index_to_position(out_index, out_strides)
+            a_position = index_to_position(out_index, a_strides)
+            accumulator = out[out_position]
+            for reduction_index in range(a_shape[reduce_dim]):
+                accumulator = fn(
+                    accumulator,
+                    a_storage[a_position + reduction_index * a_strides[reduce_dim]],
+                )
+            out[out_position] = accumulator
 
     return njit(parallel=True)(_reduce)  # type: ignore
 
@@ -282,8 +330,23 @@ def _tensor_matrix_multiply(
     a_batch_stride = a_strides[0] if a_shape[0] > 1 else 0
     b_batch_stride = b_strides[0] if b_shape[0] > 1 else 0
 
-    # TODO: Implement for Task 3.2.
-    raise NotImplementedError('Need to implement for Task 3.2')
+    rows = out_shape[1]
+    columns = out_shape[2]
+    inner = a_shape[2]
+    for ordinal in prange(len(out)):
+        batch = ordinal // (rows * columns)
+        remainder = ordinal % (rows * columns)
+        row = remainder // columns
+        column = remainder % columns
+        a_base = batch * a_batch_stride + row * a_strides[1]
+        b_base = batch * b_batch_stride + column * b_strides[2]
+        value = 0.0
+        for k in range(inner):
+            value += (
+                a_storage[a_base + k * a_strides[2]]
+                * b_storage[b_base + k * b_strides[1]]
+            )
+        out[ordinal] = value
 
 
 tensor_matrix_multiply = njit(parallel=True, fastmath=True)(_tensor_matrix_multiply)

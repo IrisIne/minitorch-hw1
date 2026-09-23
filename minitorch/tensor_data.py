@@ -43,8 +43,10 @@ def index_to_position(index: Index, strides: Strides) -> int:
         Position in storage
     """
 
-    # TODO: Implement for Task 2.1.
-    raise NotImplementedError('Need to implement for Task 2.1')
+    position = 0
+    for dim in range(len(strides)):
+        position += index[dim] * strides[dim]
+    return position
 
 
 def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
@@ -60,8 +62,10 @@ def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
         out_index : return index corresponding to position.
 
     """
-    # TODO: Implement for Task 2.1.
-    raise NotImplementedError('Need to implement for Task 2.1')
+    remaining = ordinal
+    for dim in range(len(shape) - 1, -1, -1):
+        out_index[dim] = remaining % shape[dim]
+        remaining = remaining // shape[dim]
 
 
 def broadcast_index(
@@ -83,8 +87,9 @@ def broadcast_index(
     Returns:
         None
     """
-    # TODO: Implement for Task 2.2.
-    raise NotImplementedError('Need to implement for Task 2.2')
+    offset = len(big_shape) - len(shape)
+    for dim in range(len(shape)):
+        out_index[dim] = 0 if shape[dim] == 1 else big_index[dim + offset]
 
 
 def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
@@ -101,8 +106,14 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
     Raises:
         IndexingError : if cannot broadcast
     """
-    # TODO: Implement for Task 2.2.
-    raise NotImplementedError('Need to implement for Task 2.2')
+    result = []
+    for dim in range(1, max(len(shape1), len(shape2)) + 1):
+        a = shape1[-dim] if dim <= len(shape1) else 1
+        b = shape2[-dim] if dim <= len(shape2) else 1
+        if a != b and a != 1 and b != 1:
+            raise IndexingError(f"Cannot broadcast {shape1} and {shape2}")
+        result.append(max(a, b))
+    return tuple(reversed(result))
 
 
 def strides_from_shape(shape: UserShape) -> UserStrides:
@@ -128,7 +139,7 @@ class TensorData:
         shape: UserShape,
         strides: Optional[UserStrides] = None,
     ):
-        if isinstance(storage, np.ndarray):
+        if isinstance(storage, np.ndarray) or hasattr(storage, "copy_to_host"):
             self._storage = storage
         else:
             self._storage = array(storage, dtype=float64)
@@ -149,7 +160,7 @@ class TensorData:
         assert len(self._storage) == self.size
 
     def to_cuda_(self) -> None:  # pragma: no cover
-        if not numba.cuda.is_cuda_array(self._storage):
+        if not hasattr(self._storage, "copy_to_host"):
             self._storage = numba.cuda.to_device(self._storage)
 
     def is_contiguous(self) -> bool:
@@ -227,8 +238,9 @@ class TensorData:
             range(len(self.shape))
         ), f"Must give a position to each dimension. Shape: {self.shape} Order: {order}"
 
-        # TODO: Implement for Task 2.1.
-        raise NotImplementedError('Need to implement for Task 2.1')
+        shape = tuple(self.shape[i] for i in order)
+        strides = tuple(self.strides[i] for i in order)
+        return TensorData(self._storage, shape, strides)
 
     def to_string(self) -> str:
         s = ""
